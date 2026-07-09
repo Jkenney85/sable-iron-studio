@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "./prisma";
 import { getSession } from "./auth";
 import { BookingStatus } from "@prisma/client";
@@ -13,6 +14,80 @@ async function requireAdmin() {
   const session = await getSession();
   if (!session) throw new Error("Not authorized.");
   return session;
+}
+
+// Build a URL-safe, unique slug from a name (appends -2, -3, … on collision).
+async function uniqueArtistSlug(name: string): Promise<string> {
+  const base =
+    name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^\w\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-") || "artist";
+  let slug = base;
+  let n = 2;
+  // eslint-disable-next-line no-await-in-loop
+  while (await prisma.artist.findUnique({ where: { slug }, select: { id: true } })) {
+    slug = `${base}-${n++}`;
+  }
+  return slug;
+}
+
+export async function createArtist(formData: FormData) {
+  await requireAdmin();
+  const name = String(formData.get("name") || "").trim();
+  if (name.length < 2) throw new Error("Please enter the artist's name.");
+
+  const styles = String(formData.get("styles") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const slug = await uniqueArtistSlug(name);
+  const max = await prisma.artist.aggregate({ _max: { sortOrder: true } });
+
+  const artist = await prisma.artist.create({
+    data: {
+      name,
+      slug,
+      title: String(formData.get("title") || "").trim() || null,
+      styles,
+      bio: "",
+      // New artists start hidden + closed so they aren't public until finished.
+      active: false,
+      bookingOpen: false,
+      sortOrder: (max._max.sortOrder ?? 0) + 1,
+    },
+  });
+
+  revalidatePath("/admin/artists");
+  revalidatePath("/artists");
+  // Continue straight to the full editor to add bio, images, availability, etc.
+  redirect(`/admin/artists/${artist.id}`);
+}
+
+export async function deleteArtist(artistId: string) {
+  await requireAdmin();
+
+  // Preserve booking history: block hard-deletion of an artist who has bookings.
+  // Staff can instead deactivate / close bookings from the profile editor.
+  const bookings = await prisma.booking.count({ where: { artistId } });
+  if (bookings > 0) {
+    throw new Error(
+      `This artist has ${bookings} booking${bookings > 1 ? "s" : ""} and can't be deleted. ` +
+        "Uncheck “Visible on site” and “Accepting bookings” to retire them instead."
+    );
+  }
+
+  // Availability, time off, portfolio links and appointment-type links cascade
+  // (or null out) via the schema relations.
+  await prisma.artist.delete({ where: { id: artistId } });
+
+  revalidatePath("/admin/artists");
+  revalidatePath("/artists");
+  redirect("/admin/artists");
 }
 
 export async function updateBookingStatus(bookingId: string, status: BookingStatus) {
@@ -50,6 +125,8 @@ export async function updateArtistProfile(formData: FormData) {
       pronouns: String(formData.get("pronouns") || "").trim() || null,
       bio: String(formData.get("bio") || "").trim(),
       instagram: String(formData.get("instagram") || "").trim() || null,
+      avatarUrl: String(formData.get("avatarUrl") || "").trim() || null,
+      heroUrl: String(formData.get("heroUrl") || "").trim() || null,
       styles,
       active: formData.get("active") === "on",
       bookingOpen: formData.get("bookingOpen") === "on",

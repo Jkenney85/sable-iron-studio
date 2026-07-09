@@ -7,6 +7,7 @@ import {
   addAvailabilityWindow,
   deleteAvailabilityWindow,
 } from "@/lib/admin-actions";
+import { DeleteArtistButton } from "@/components/admin/DeleteArtistButton";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,34 @@ export default async function AdminArtistDetail({
           <label className="field-label">Styles (comma-separated)</label>
           <input name="styles" defaultValue={artist.styles.join(", ")} className="field" />
         </div>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div>
+            <label className="field-label">Avatar image URL</label>
+            <input
+              name="avatarUrl"
+              defaultValue={artist.avatarUrl ?? ""}
+              className="field"
+              placeholder="https://…/portrait.jpg"
+            />
+          </div>
+          <div>
+            <label className="field-label">Hero image URL</label>
+            <input
+              name="heroUrl"
+              defaultValue={artist.heroUrl ?? ""}
+              className="field"
+              placeholder="https://…/work.jpg"
+            />
+          </div>
+        </div>
+        {artist.avatarUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={artist.avatarUrl}
+            alt={`${artist.name} avatar preview`}
+            className="h-16 w-16 rounded-full border border-ink-line object-cover"
+          />
+        )}
         <div>
           <label className="field-label">Bio</label>
           <textarea name="bio" rows={4} defaultValue={artist.bio} className="field resize-none" />
@@ -150,6 +179,17 @@ export default async function AdminArtistDetail({
             Add window
           </button>
         </form>
+      </div>
+
+      {/* Danger zone */}
+      <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/[0.04] p-6">
+        <h2 className="font-display text-xl text-red-300">Delete artist</h2>
+        <p className="mb-4 mt-1 max-w-lg text-sm text-bone-muted">
+          Permanently removes this artist and their availability and portfolio.
+          Artists with existing bookings can&apos;t be deleted — hide them with
+          “Visible on site” / “Accepting bookings” instead to keep booking history.
+        </p>
+        <DeleteArtistButton artistId={artist.id} artistName={artist.name} />
       </div>
     </div>
   );

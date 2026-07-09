@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, EmptyState } from "@/components/admin/ui";
+import { createArtist } from "@/lib/admin-actions";
 import { clsx } from "clsx";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +19,39 @@ export default async function AdminArtistsPage() {
     <div>
       <PageHeader title="Artists" subtitle="Profiles, booking status and calendars." />
 
+      {/* Add a new artist. New profiles start hidden + closed to bookings so you
+          can fill in the details before they go live. */}
+      <details className="card mb-6 p-5 [&_summary]:cursor-pointer">
+        <summary className="flex items-center justify-between font-display text-lg marker:content-none">
+          <span>Add an artist</span>
+          <span className="font-mono text-[11px] uppercase tracking-widest text-vermilion">
+            + New
+          </span>
+        </summary>
+        <form
+          action={createArtist}
+          className="mt-5 flex flex-wrap items-end gap-3 border-t border-ink-line pt-5"
+        >
+          <div className="min-w-[200px] flex-1">
+            <label className="field-label">Name *</label>
+            <input name="name" required className="field" placeholder="e.g. Alex Rivera" />
+          </div>
+          <div className="min-w-[200px] flex-1">
+            <label className="field-label">Styles (comma-separated)</label>
+            <input name="styles" className="field" placeholder="Blackwork, Fine line" />
+          </div>
+          <div className="min-w-[160px]">
+            <label className="field-label">Title</label>
+            <input name="title" className="field" placeholder="Resident Artist" />
+          </div>
+          <button type="submit" className="btn-primary">
+            Create &amp; edit →
+          </button>
+        </form>
+      </details>
+
       {artists.length === 0 ? (
-        <EmptyState title="No artists yet" hint="Seed demo data to get started" />
+        <EmptyState title="No artists yet" hint="Add your first artist above" />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {artists.map((a) => (

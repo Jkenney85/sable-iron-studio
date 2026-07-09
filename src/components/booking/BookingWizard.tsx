@@ -150,9 +150,11 @@ export function BookingWizard({
   }
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
       {/* ── Main column ─────────────────────────────────────── */}
-      <div>
+      {/* min-w-0 lets the inner date strip's overflow-x-auto engage instead of
+          stretching the grid track and pushing the summary column off-screen. */}
+      <div className="min-w-0">
         {/* Stepper */}
         <ol className="mb-8 flex flex-wrap items-center gap-x-2 gap-y-2">
           {steps.map((s, i) => (

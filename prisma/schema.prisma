@@ -1,0 +1,350 @@
+// Sable & Iron — relational data model
+// Postgres via Prisma. Designed to be extended later with Google Calendar sync,
+// SMS notifications, and production file storage without breaking changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth / staff
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Admin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("owner") // owner | staff
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Studio configuration (single row; id = "studio")
+// ─────────────────────────────────────────────────────────────────────────────
+
+model StudioSetting {
+  id              String   @id @default("studio")
+  name            String   @default("Sable & Iron")
+  tagline         String   @default("")
+  about           String   @default("")
+  email           String   @default("")
+  phone           String   @default("")
+  addressLine1    String   @default("")
+  addressLine2    String   @default("")
+  city            String   @default("")
+  region          String   @default("")
+  postalCode      String   @default("")
+  country         String   @default("")
+  instagram       String   @default("")
+  hoursJson       Json?    // { "mon": "12–8", ... } opening hours copy
+  depositPolicy   String   @default("")
+  cancellationPolicy String @default("")
+  currency        String   @default("usd")
+  timezone        String   @default("America/New_York")
+  updatedAt       DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Artists
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Artist {
+  id         String  @id @default(cuid())
+  slug       String  @unique
+  name       String
+  pronouns   String?
+  title      String? // e.g. "Resident Artist", "Guest"
+  styles     String[] // e.g. ["Blackwork", "Fine line"]
+  bio        String  @default("")
+  avatarUrl  String?
+  heroUrl    String?
+  instagram  String?
+  active     Boolean @default(true)
+  bookingOpen Boolean @default(true)
+  sortOrder  Int     @default(0)
+
+  // Google Calendar sync (per artist) — reserved for a later integration.
+  gcalCalendarId String?
+  gcalSyncEnabled Boolean @default(false)
+  gcalSyncToken   String?
+
+  availability AvailabilityWindow[]
+  timeOff      TimeOff[]
+  portfolio    PortfolioItem[]
+  bookings     Booking[]
+  appointmentTypes AppointmentTypeArtist[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, sortOrder])
+}
+
+// Recurring weekly working hours. Slots are generated from these windows.
+model AvailabilityWindow {
+  id           String @id @default(cuid())
+  artist       Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  artistId     String
+  dayOfWeek    Int    // 0 = Sunday … 6 = Saturday
+  startMinutes Int    // minutes from midnight (studio timezone), e.g. 720 = 12:00
+  endMinutes   Int
+  createdAt    DateTime @default(now())
+
+  @@index([artistId, dayOfWeek])
+}
+
+// One-off blocks (vacation, conventions, personal). Blocks slot generation.
+model TimeOff {
+  id        String   @id @default(cuid())
+  artist    Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  artistId  String
+  startAt   DateTime
+  endAt     DateTime
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([artistId, startAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Appointment types & payment rules
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PaymentPolicy {
+  DEPOSIT_REQUIRED // deposit taken now, balance in-studio
+  FULL_REQUIRED    // full price taken now
+  CUSTOMER_CHOICE  // customer picks deposit or full at checkout
+}
+
+model AppointmentType {
+  id            String        @id @default(cuid())
+  slug          String        @unique
+  name          String
+  description   String        @default("")
+  durationMinutes Int         @default(60)
+  // Prices are stored in the smallest currency unit (cents).
+  priceCents    Int           @default(0)   // full session price (0 = "quote / consult")
+  depositCents  Int           @default(0)   // deposit amount when a deposit applies
+  paymentPolicy PaymentPolicy @default(DEPOSIT_REQUIRED)
+  requiresIntake Boolean      @default(true) // show the tattoo intake step
+  color         String        @default("#e2472a") // schedule chip color
+  active        Boolean       @default(true)
+  sortOrder     Int           @default(0)
+
+  artists  AppointmentTypeArtist[]
+  bookings Booking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, sortOrder])
+}
+
+// Which artists offer which appointment types (many-to-many).
+model AppointmentTypeArtist {
+  appointmentType   AppointmentType @relation(fields: [appointmentTypeId], references: [id], onDelete: Cascade)
+  appointmentTypeId String
+  artist            Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  artistId          String
+
+  @@id([appointmentTypeId, artistId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customers & bookings
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  notes     String?   // internal staff notes
+  bookings  Booking[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([email])
+}
+
+enum BookingStatus {
+  PENDING          // created, before checkout
+  AWAITING_PAYMENT // Stripe Checkout session opened, not yet paid
+  CONFIRMED        // payment succeeded
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum PaymentChoice {
+  DEPOSIT
+  FULL
+}
+
+model Booking {
+  id                String        @id @default(cuid())
+  reference         String        @unique // short human-friendly code, e.g. SI-7K3Q5P
+
+  artist            Artist        @relation(fields: [artistId], references: [id])
+  artistId          String
+  appointmentType   AppointmentType @relation(fields: [appointmentTypeId], references: [id])
+  appointmentTypeId String
+  customer          Customer      @relation(fields: [customerId], references: [id])
+  customerId        String
+
+  startTime         DateTime
+  endTime           DateTime
+  status            BookingStatus @default(PENDING)
+
+  paymentChoice     PaymentChoice // DEPOSIT or FULL
+  // Snapshot of pricing at booking time (source of truth for what was charged).
+  amountDueCents    Int           @default(0)
+  currency          String        @default("usd")
+
+  intake            TattooIntake?
+  payments          Payment[]
+  notifications     NotificationEvent[]
+
+  // Google Calendar sync (per booking) — reserved for a later integration.
+  gcalEventId       String?
+  gcalSyncStatus    String?  // pending | synced | error | disabled
+  gcalLastSyncedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Fast lookups + supports the app-level double-booking guard.
+  @@index([artistId, startTime])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tattoo intake (optional details) + reference images
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TattooIntake {
+  id          String   @id @default(cuid())
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId   String   @unique
+  placement   String?
+  approxSize  String?
+  style       String?
+  budget      String?
+  notes       String?
+  isColor     Boolean?
+  isCoverUp   Boolean?
+  references  ReferenceImage[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ReferenceImage {
+  id        String       @id @default(cuid())
+  intake    TattooIntake @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  intakeId  String
+  url       String       // relative path under /uploads (local) or storage URL
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  createdAt DateTime     @default(now())
+
+  @@index([intakeId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payments (Stripe)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+model Payment {
+  id                     String        @id @default(cuid())
+  booking                Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId              String
+  kind                   PaymentChoice // DEPOSIT or FULL
+  status                 PaymentStatus @default(PENDING)
+  amountCents            Int
+  currency               String        @default("usd")
+
+  // Stripe identifiers — never store raw card data.
+  stripeCheckoutSessionId String?      @unique
+  stripePaymentIntentId   String?
+  stripeChargeId          String?
+  receiptUrl              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications (email now; SMS later)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
+
+enum NotificationKind {
+  BOOKING_CONFIRMATION
+  PAYMENT_RECEIPT
+  APPOINTMENT_REMINDER
+  STUDIO_NEW_BOOKING
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model NotificationEvent {
+  id        String              @id @default(cuid())
+  booking   Booking?            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId String?
+  channel   NotificationChannel @default(EMAIL)
+  kind      NotificationKind
+  status    NotificationStatus  @default(PENDING)
+  to        String
+  subject   String?
+  error     String?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  @@index([bookingId])
+  @@index([kind, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Portfolio / gallery
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PortfolioItem {
+  id        String   @id @default(cuid())
+  artist    Artist?  @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  artistId  String?
+  title     String   @default("")
+  imageUrl  String
+  style     String?
+  featured  Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([featured, sortOrder])
+}

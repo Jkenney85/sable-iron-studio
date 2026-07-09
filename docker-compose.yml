@@ -1,0 +1,65 @@
+# Local development stack for Sable & Iron.
+#   docker compose up --build
+# Then open http://localhost:3000 (site) and http://localhost:8025 (Mailpit inbox).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sable
+      POSTGRES_PASSWORD: sable
+      POSTGRES_DB: sable_iron
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sable -d sable_iron"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Catch-all SMTP inbox for testing email scaffolding. UI at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Overrides for the compose network. Secrets come from `.env` (see env_file).
+      DATABASE_URL: "postgresql://sable:sable@db:5432/sable_iron?schema=public"
+      DB_HOST: db
+      DB_PORT: 5432
+      # Keep the server clock aligned with the studio timezone so generated
+      # booking slots match the artist's calendar (see availability.ts note).
+      TZ: "America/Los_Angeles"
+      APP_URL: "http://localhost:3000"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      EMAIL_FROM: "Sable & Iron <bookings@sableiron.test>"
+      # Seed demo data on first boot. Set to "false" after the first successful run.
+      RUN_SEED: "true"
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist uploaded reference images across container restarts.
+      - uploads_data:/app/public/uploads
+
+volumes:
+  db_data:
+  uploads_data:

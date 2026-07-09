@@ -28,6 +28,13 @@ RUN npm run build
 # Writable uploads directory for reference images.
 RUN mkdir -p /app/public/uploads
 
+# Ensure the entrypoint is executable inside the image. COPY preserves the host
+# file's permission bits, and the script may arrive without the exec bit (e.g.
+# checked out on Windows/macOS), which causes "exec: permission denied" at start.
+RUN chmod +x /app/docker-entrypoint.sh
+
 EXPOSE 3000
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# Invoke via `sh` as a belt-and-suspenders guard against a missing exec bit or
+# CRLF line endings on the script.
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 CMD ["npm", "run", "start"]

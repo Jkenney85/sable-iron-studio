@@ -1,10 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 export function LoginForm({ from }: { from?: string }) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,8 +24,10 @@ export function LoginForm({ from }: { from?: string }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Sign-in failed.");
       }
-      router.replace(from || "/admin");
-      router.refresh();
+      // Hard navigation (not router.replace) so the browser sends the freshly
+      // set cookie and middleware re-evaluates auth from a clean page load —
+      // avoids the component being reused with a stuck "Signing in…" state.
+      window.location.assign(from || "/admin");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
       setLoading(false);

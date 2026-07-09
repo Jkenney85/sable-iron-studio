@@ -57,11 +57,22 @@ export async function verifySessionToken(
 export function setSessionCookie(token: string) {
   cookies().set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // Base the Secure flag on the real URL scheme, not NODE_ENV. A `Secure`
+    // cookie is silently dropped by browsers over plain HTTP, which would leave
+    // admin login "stuck" (200 response, but no cookie stored) on an HTTP test
+    // deploy. Set APP_URL to an https:// URL in production to re-enable Secure.
+    // COOKIE_SECURE ("true"/"false") can force it either way behind a proxy.
+    secure: cookieSecure(),
     sameSite: "lax",
     path: "/",
     maxAge: MAX_AGE_SECONDS,
   });
+}
+
+function cookieSecure(): boolean {
+  if (process.env.COOKIE_SECURE === "true") return true;
+  if (process.env.COOKIE_SECURE === "false") return false;
+  return env.appUrl.startsWith("https://");
 }
 
 export function clearSessionCookie() {
